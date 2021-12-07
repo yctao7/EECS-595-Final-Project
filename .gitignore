@@ -1,0 +1,8 @@
+Verifiable-Coherent-NLU_yctao.ipynb
+.ipynb_checkpoints
+cache
+www/__pycache__
+www/dataset/__pycache__
+www/model/__pycache__
+saved_models/yctao/**/*.bin
+saved_models/yctao/**/*.pth

@@ -242,7 +242,8 @@ class TieredModelPipeline(nn.Module):
     self.ablation = ablation
     self.loss_weights = loss_weights
 
-
+    self.story_classifier = nn.Sequential(nn.Linear(encoding_size, encoding_size // 2), nn.ReLU(), nn.Linear(encoding_size // 2, 1))
+    
   def forward(self, input_ids, input_lengths, input_entities, attention_mask=None, token_type_ids=None, attributes=None, preconditions=None, effects=None, conflicts=None, labels=None, training=False):
 
     batch_size, num_stories, num_entities, num_sents, seq_length = input_ids.shape
@@ -403,7 +404,16 @@ class TieredModelPipeline(nn.Module):
 
     # Then through output projection - get logits for belief on each span to be conflicting
     out = self.dropout(out)
+    
+    # Get sentence embeddings
+    sent_embs = out.view(batch_size, num_stories, num_entities * num_sents, -1).clone()
+    
     out = self.decoder(out)
+    
+    # Get story embeddings
+    attn_scores = Softmax(dim=-1)(out.view(batch_size, num_stories, 1, -1)).detach()
+    story_embs = attn_scores.matmul(sent_embs).view(batch_size, num_stories, -1) # [batch_size * num_stories * len_embs]
+    
     out = torch.sigmoid(out) * length_mask # Do sigmoid again since this happened inside loss function
     assert input_lengths.shape[0] == out.shape[0]
     return_dict['out_conflicts'] = out # * length_mask
@@ -416,8 +426,10 @@ class TieredModelPipeline(nn.Module):
       return_dict['loss_conflicts'] = loss_conflicts
 
     # 4) Story choice classification
-    out = out.view(batch_size, num_stories, num_entities, -1) # Reshape to one prediction per example-story-entity triples    
-    out = -torch.sum(out, dim=(2,3)) / 2 # divide by 2 so the expected sum is 1 for conflicting story (2 conflicting sentences)
+#     out = out.view(batch_size, num_stories, num_entities, -1) # Reshape to one prediction per example-story-entity triples    
+#     out = -torch.sum(out, dim=(2,3)) / 2 # divide by 2 so the expected sum is 1 for conflicting story (2 conflicting sentences)
+    out = self.story_classifier(story_embs).view(batch_size, -1)
+    
     return_dict['out_stories'] = out
     loss_stories = None
     if labels is not None:
