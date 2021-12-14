@@ -30,7 +30,7 @@ If I'm missing any, please let me know!
 ### Setup Details
 First clone the repo:
 ```
-git clone https://github.com/sled-group/Verifiable-Coherent-NLU.git
+git clone https://github.com/yctao7/EECS-595-Final-Project.git
 ```
 
 You will then need to upload the contents of this folder to Google Drive.
