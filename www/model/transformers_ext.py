@@ -243,6 +243,7 @@ class TieredModelPipeline(nn.Module):
     self.loss_weights = loss_weights
 
     self.story_classifier = nn.Sequential(nn.Linear(encoding_size, encoding_size // 2), nn.ReLU(), nn.Linear(encoding_size // 2, 1))
+    self.gate_builder = nn.Sequential(nn.Linear(embedding.config.hidden_size, embedding.config.hidden_size), nn.ReLU(), nn.Linear(embedding.config.hidden_size, num_attributes), nn.Sigmoid())
     
   def forward(self, input_ids, input_lengths, input_entities, attention_mask=None, token_type_ids=None, attributes=None, preconditions=None, effects=None, conflicts=None, labels=None, training=False):
 
@@ -278,7 +279,9 @@ class TieredModelPipeline(nn.Module):
       
     if len(out[0].shape) < 3:
       out[0] = out[0].unsqueeze(0)
-    out = out[0][:,0,:] # entity-sentence embeddings
+    out = out[0][:,0,:] # entity-sentence embeddings, [batch_size * num_stories * num_entities * num_sents, 1024]
+    
+    attribute_gates = self.gate_builder(out.view(batch_size * num_stories * num_entities, num_sents, -1).mean(dim=1))
 
 
     # 2) State classification
@@ -312,7 +315,7 @@ class TieredModelPipeline(nn.Module):
       out_s = self.precondition_classifiers[i](out, return_embeddings=False)
 
       with torch.no_grad(): # Don't allow backprop from conflict detection to state classifiers
-        out_preconditions_softmax = torch.cat((out_preconditions_softmax, out_s), dim=-1)
+        out_preconditions_softmax = torch.cat((out_preconditions_softmax, (out_s.view(batch_size * num_stories * num_entities, -1) * attribute_gates[:, i:i+1]).view(batch_size * num_stories * num_entities * num_sents, -1)), dim=-1)
 
       if 'attributes' not in self.ablation:
         # If attribute classifier predicted 0, zero out positive classes and vice versa
@@ -342,7 +345,7 @@ class TieredModelPipeline(nn.Module):
     for i in range(self.num_attributes):
       out_s = self.effect_classifiers[i](out, return_embeddings=False)
       with torch.no_grad(): # Don't allow backprop from conflict detection to state classifiers
-        out_effects_softmax = torch.cat((out_effects_softmax, out_s), dim=-1)
+        out_effects_softmax = torch.cat((out_effects_softmax, (out_s.view(batch_size * num_stories * num_entities, -1) * attribute_gates[:, i:i+1]).view(batch_size * num_stories * num_entities * num_sents, -1)), dim=-1)
 
       if 'attributes' not in self.ablation:
         # If attribute classifier predicted 0, zero out positive classes and vice versa
